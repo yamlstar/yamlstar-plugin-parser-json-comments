@@ -1,0 +1,80 @@
+[{:name "JSON boundaries"
+  :input "[null//c\n,true/*c*/,false//c\n,-20/*c*/,1.25//c\n,1e3/*c*/]"
+  :want "[null,true,false,-20,1.25,1e3]"}
+ {:name "Ordinary scalars"
+  :input "a: foo// text\nb: http://example.com\nc: True// text\nd: 01// text\ne: nullish/* text */"
+  :want "a: foo// text\nb: http://example.com\nc: True// text\nd: 01// text\ne: nullish/* text */"}
+ {:name "Inline block spacing"
+  :input "a: foo /* comment */ bar"
+  :want "a: foo  bar"}
+ {:name "Multiline inline block"
+  :input "a: foo /* first\nsecond */ bar"
+  :want "a: foo  bar"}
+ {:name "Quoted content"
+  :input "a: 'http://example.com/*path*/'\nb: \"// text\""
+  :want "a: 'http://example.com/*path*/'\nb: \"// text\""}
+ {:name "Block scalars"
+  :input "a: | //header\n  // line\n  /* block */\nb: >\n  // still content\n"
+  :want "a: |\n  // line\n  /* block */\nb: >\n  // still content\n"}
+ {:name "JSONC issue example"
+  :input "{/* top */ /*0*/ /*1*/\"foo\"/*2*/ /*3*/:/*4*/ /*5*/false/*6*/ /*7*/,//8\n// middle\n/*9*/\"bar\"/*10*/:/*11*/true//12\n/*bottom*/}"
+  :want "{\"foo\":false,\"bar\":true}"}
+ {:name "Hash adjacency"
+  :input "[\"a\"#a\n,#comma\n[]#seq\n,{}#map\n]#end"
+  :want "[\"a\",[],{}]"}
+ {:name "Hash in plain scalar"
+  :input "a: foo#bar"
+  :want "a: foo#bar"}
+ {:name "Tags anchors aliases"
+  :input "base: &base [!!str 1, !custom value] //base\nalias: *base /*reuse*/"
+  :want "base: &base [!!str 1, !custom value]\nalias: *base"}
+ {:name "Unicode CRLF"
+  :input "a: true// 注\r\nb: false/* λ\nμ */\r\n"
+  :want "a: true\nb: false"}
+ {:name "Document boundaries"
+  :input "--- true//first\n.../*between*/\n--- false"
+  :want "--- true\n...\n--- false"}
+ {:name "Empty input" :input "" :want ""}
+ {:name "Comments only" :input "// no document\n/* no document */" :want ""}
+ {:name "Unterminated comment" :input "a: true/* unterminated" :error "Unterminated block comment"}
+ {:name "Separate JSON literals" :input "[true/*c*/false]" :error "Parser"}
+ {:name "Invalid YAML" :input "[1, 2" :error "Parser"}
+ {:name "Plain scalar line continuation"
+  :input "a: foo //comment\n  bar"
+  :want "a: foo bar"}
+ {:name "Comment before nested block"
+  :input "a: /* comment */\n  b: true"
+  :want "a:\n  b: true"}
+ {:name "Comment between nested entries"
+  :input "a:\n  /* first\n   second */\n  b: true\n  //entry\n  c: false"
+  :want "a:\n  b: true\n  c: false"}
+ {:name "Comment after sequence entry"
+  :input "- /*comment*/\n  a: true"
+  :want "- a: true"}
+ {:name "Repeated inline comments"
+  :input "a: foo /*a*//*b*/ bar"
+  :want "a: foo  bar"}
+ {:name "Unterminated ordinary marker is literal"
+  :input "a: foo/*unterminated"
+  :want "a: foo/*unterminated"}
+ {:name "Directive comment adjacency"
+  :input "---/*comment*/true"
+  :want "--- true"}
+ {:name "Comment after quoted scalar"
+  :input "a: 'value'/*c*/"
+  :want "a: 'value'"}
+ {:name "Multiline literal header comment"
+  :input "a: | /*first\nsecond*/\n  content\n"
+  :want "a: |\n  content\n"}
+ {:name "Multiline folded header comment"
+  :input "a: >- /*first\nsecond*/\n  content\n"
+  :want "a: >-\n  content\n"}
+ {:name "Explicit indentation with header comment"
+  :input "a: |2 /*first\nsecond*/\n   content\n"
+  :want "a: |2\n   content\n"}
+ {:name "Block opener within line header comment"
+  :input "a: | // /* ordinary comment text\n  content\n"
+  :want "a: |\n  content\n"}
+ {:name "Unicode plain scalar comment spans"
+  :input "a: 🙂 /*comment*/ λ"
+  :want "a: 🙂  λ"}]

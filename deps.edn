@@ -1,0 +1,8 @@
+{:paths ["src"]
+ :mvn/local-repo ".cache/local/home/.m2/repository"
+ :deps {org.yamlstar/yaml-parser {:mvn/version "0.2.6"}}
+ :aliases
+ {:dev {:override-deps
+        {org.yamlstar/yaml-parser {:local/root "../yaml-reference-parser-clj"}}}
+  :test {:extra-paths ["test"]
+         :main-opts ["-m" "yamlstar-plugin.parser.json-comments-test"]}}}

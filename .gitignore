@@ -1,0 +1,6 @@
+/.cache/
+/target/
+/.cpcache/
+/pom.xml
+
+!ReadMe.md
