@@ -16,12 +16,16 @@ events, err := parser.Parse([]byte("answer: true// comment"))
 (parser/parse "answer: true// comment")
 ```
 
-Select `--plugin=parser=json-comments` in either host CLI.
+Select `--plugin=parser=json-comments` in the YAMLStar CLI.
+For go-yaml, use `--plugin=yaml-parser=json-comments`.
 For YAMLStar Python, use `yamlstar.parser('json-comments')`.
 
 ## go-yaml integration
 
 The `goyaml` package provides the go-yaml adapter in this module.
+These compatibility changes require a new release: the published `v0.1.0`
+adapter still uses the former `parser` API and `plugin/limit` test import.
+Use the updated local checkout until that release is available.
 Use it directly with `yaml.WithPlugin(goyaml.New())`:
 
 ```go
@@ -42,7 +46,7 @@ check its error, and then parse configuration with `yaml.OptsYAML`:
 if err := goyaml.Register(); err != nil {
     return err
 }
-options, err := yaml.OptsYAML("plugin: {parser: json-comments@v0.1.0}")
+options, err := yaml.OptsYAML("plugin: {yaml-parser: json-comments@v0.1.0}")
 ```
 
 Registration accepts no plugin-specific configuration.
@@ -51,17 +55,18 @@ Importing the package does not register it, and registration preserves the
 native default parser.
 `goyaml.Version` reports the linked parser version.
 
-With go-yaml's generic CLI build support:
+After publishing the compatibility changes, set `RELEASE` to the new tag
+and use go-yaml's generic CLI build support:
 
 ```bash
 make cli \
-  PLUGIN-PACKAGE=github.com/yamlstar/yamlstar-plugin-parser-json-comments/goyaml@v0.1.0 \
-  PLUGIN=parser=json-comments
+  PLUGIN-PACKAGE=github.com/yamlstar/yamlstar-plugin-parser-json-comments/goyaml@$RELEASE \
+  PLUGIN=yaml-parser=json-comments
 ```
 
 `PLUGIN-PACKAGE` links the adapter; `PLUGIN` selects the parser.
 A build that only sets `PLUGIN-PACKAGE` retains native defaults and can select
-the parser later through configuration or `--plugin=parser=json-comments`.
+the parser later through configuration or `--plugin=yaml-parser=json-comments`.
 
 ## Syntax
 

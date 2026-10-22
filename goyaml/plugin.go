@@ -23,12 +23,12 @@ const Version = jsoncommentsparser.Version
 // New creates a JSON-comments parser plugin.
 func New() *Plugin { return &Plugin{} }
 
-// Register enables parser=json-comments in yaml.OptsYAML.
+// Register enables yaml-parser=json-comments in yaml.OptsYAML.
 // Call it during startup before parsing configuration.
 // Registration preserves the native default and rejects duplicate calls.
 func Register() error {
 	return yaml.RegisterPlugin(yaml.PluginRegistration{
-		API: "parser", Name: "json-comments", Version: Version,
+		API: "yaml-parser", Name: "json-comments", Version: Version,
 		Factory: func(cfg map[string]any) (any, error) {
 			if len(cfg) != 0 {
 				return nil, errors.New(

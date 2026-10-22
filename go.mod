@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/glojurelang/glojure v0.7.15
 	github.com/yamlstar/yamlstar-plugin-parser-reference v0.2.6
-	go.yaml.in/yaml/v4 v4.0.0-rc.6.0.20261019170204-14f6a7261be3
+	go.yaml.in/yaml/v4 v4.0.0-rc.6.0.20261021023914-32734c39dedb
 )
 
 require (

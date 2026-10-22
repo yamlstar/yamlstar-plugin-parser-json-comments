@@ -13,7 +13,7 @@ import (
 
 	"github.com/yamlstar/yamlstar-plugin-parser-json-comments/goyaml"
 	"go.yaml.in/yaml/v4"
-	"go.yaml.in/yaml/v4/plugin/limit"
+	"go.yaml.in/yaml/v4/plugin/loaderlimits"
 )
 
 func TestFixtures(t *testing.T) {
@@ -95,16 +95,16 @@ func TestRegistration(t *testing.T) {
 		}
 		return
 	}
-	if _, err := yaml.OptsYAML("plugin: {parser: json-comments}"); err == nil {
+	if _, err := yaml.OptsYAML("plugin: {yaml-parser: json-comments}"); err == nil {
 		t.Fatal("import registered the adapter implicitly")
 	}
 	if err := goyaml.Register(); err != nil {
 		t.Fatal(err)
 	}
 	for _, config := range []string{
-		"plugin: {parser: json-comments}",
-		"plugin: {parser: json-comments@v" + goyaml.Version + "}",
-		"plugin: {parser: {name: json-comments, version: " +
+		"plugin: {yaml-parser: json-comments}",
+		"plugin: {yaml-parser: json-comments@v" + goyaml.Version + "}",
+		"plugin: {yaml-parser: {name: json-comments, version: " +
 			goyaml.Version + "}}",
 	} {
 		opt, err := yaml.OptsYAML(config)
@@ -117,16 +117,18 @@ func TestRegistration(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ config, message string }{
-		{"plugin: {parser: {name: json-comments, unknown: true}}",
-			"configuration must be empty"},
-		{"plugin: {parser: json-comments@v0.0.1}", "version mismatch"},
+		{
+			"plugin: {yaml-parser: {name: json-comments, unknown: true}}",
+			"configuration must be empty",
+		},
+		{"plugin: {yaml-parser: json-comments@v0.0.1}", "version mismatch"},
 	} {
 		if _, err := yaml.OptsYAML(tc.config); err == nil ||
 			!strings.Contains(err.Error(), tc.message) {
 			t.Fatalf("config %q: got %v, want %q", tc.config, err, tc.message)
 		}
 	}
-	for _, config := range []string{"{}", "plugin: {parser: true}"} {
+	for _, config := range []string{"{}", "plugin: {yaml-parser: true}"} {
 		opt, err := yaml.OptsYAML(config)
 		if err != nil {
 			t.Fatal(err)
@@ -184,8 +186,8 @@ func TestLimitsAndErrors(t *testing.T) {
 		input string
 		limit yaml.Option
 	}{
-		{"[[[0]]] // depth", yaml.WithPlugin(limit.New(limit.DepthValue(2)))},
-		{"[&a 1, *a] // aliases", yaml.WithPlugin(limit.New(limit.AliasValue(0)))},
+		{"[[[0]]] // depth", yaml.WithPlugin(loaderlimits.New(loaderlimits.DepthValue(2)))},
+		{"[&a 1, *a] // aliases", yaml.WithPlugin(loaderlimits.New(loaderlimits.AliasValue(0)))},
 	} {
 		var got any
 		if err := yaml.Load([]byte(tc.input), &got, plugin, tc.limit); err == nil {
