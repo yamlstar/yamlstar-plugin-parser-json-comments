@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -232,4 +233,56 @@ func TestConcurrentLoads(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestCLICommands(t *testing.T) {
+	binary := os.Getenv("GO_YAML_CLI")
+	if binary == "" {
+		t.Skip("set GO_YAML_CLI to a CLI built with the goyaml adapter")
+	}
+	binary, err := filepath.Abs(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/cli.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name, Input, Config, Want, Error string
+		Flags                            []string
+	}
+	if err := yaml.Load(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			flags := append([]string{}, tc.Flags...)
+			if tc.Config != "" {
+				config := filepath.Join(t.TempDir(), "options.yaml")
+				if err := os.WriteFile(config, []byte(tc.Config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				flags = append(flags, "-C", config)
+			}
+			cmd := exec.Command(binary, flags...)
+			cmd.Stdin = strings.NewReader(tc.Input)
+			var output, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &output, &stderr
+			err := cmd.Run()
+			if tc.Error != "" {
+				if err == nil || !strings.Contains(stderr.String(), tc.Error) {
+					t.Fatalf("got %v; stderr = %q; want %q",
+						err, stderr.String(), tc.Error)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%v: %s", err, stderr.String())
+			}
+			if strings.TrimSpace(output.String()) != strings.TrimSpace(tc.Want) {
+				t.Fatalf("output = %q; want %q", output.String(), tc.Want)
+			}
+		})
+	}
 }

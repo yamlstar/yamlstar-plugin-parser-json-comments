@@ -104,6 +104,16 @@ make test-race
 make check-generated
 ```
 
+CLI regression fixtures can exercise a go-yaml executable linked with this
+checkout's adapter.
+Build it with only `PLUGIN-PACKAGE` so native parsing remains the default,
+then run:
+
+```bash
+GO_YAML_CLI=/absolute/path/to/go-yaml \
+  make shell CMD='go test ./goyaml -run TestCLICommands -v'
+```
+
 The Clojure and Go tests share `testdata/cases.edn`.
 Consumers of the generated Go package need neither Gloat nor a C compiler.
 Release the reference source and generated module before publishing this
