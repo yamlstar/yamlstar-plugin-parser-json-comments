@@ -103,3 +103,24 @@ The Clojure and Go tests share `testdata/cases.edn`.
 Consumers of the generated Go package need neither Gloat nor a C compiler.
 Release the reference source and generated module before publishing this
 plugin and updating downstream release builds.
+
+## Release
+
+From a clean `main` containing the changes to publish, run:
+
+```bash
+make release v=0.1.0
+```
+
+The target runs the Clojure, JVM, Go, race, and shell checks, verifies generated
+code and version declarations, and tests the Go module against its published
+dependencies with local workspace replacements disabled.
+It publishes `main` when it is ahead of the remote, then creates the `v0.1.0`
+tag and GitHub release at that commit.
+The same tag includes the `goyaml` adapter; no binary assets are needed.
+
+The release requires GitHub authentication with permission to create releases.
+Existing remote tags and releases, a dirty tree, a different branch, or a
+divergent remote `main` cause it to stop.
+Use `make release v=0.1.0 d=1` to run the checks and preview the publication
+without changing the remote.

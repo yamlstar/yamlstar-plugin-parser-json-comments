@@ -9,13 +9,24 @@ GLOAT-VERSION := 0.1.80
 JAVA-VERSION := 27
 include $M/init.mk
 include $M/go.mk
+include $M/gh.mk
 include $M/gloat.mk
 include $M/babashka.mk
 include $M/clojure.mk
 include $M/clean.mk
+include $M/shellcheck.mk
 include $M/shell.mk
 
 VERSION := 0.1.0
+ifneq (,$(filter release,$(MAKECMDGOALS)))
+ifeq (,$(strip $(v)))
+$(error 'make release' requires v=VERSION)
+endif
+ifneq ($(v),$(VERSION))
+$(error Requested version $(v) does not match source version $(VERSION))
+endif
+endif
+
 MODULE := github.com/yamlstar/yamlstar-plugin-parser-json-comments
 MAKES-CLEAN := target .cpcache .cache/generated .cache/src
 YAML-PARSER-VERSION := 0.2.6
@@ -70,7 +81,10 @@ $(WORK):
 	@mkdir -p .cache
 	@printf 'go 1.24.0\n\nuse (\n  ..\n  ../../yamlstar-plugin-parser-reference\n)\n\nreplace github.com/yamlstar/yamlstar-plugin-parser-reference v0.2.6 => ../../yamlstar-plugin-parser-reference\n' > $@
 
-test: test-clojure test-go
+test: test-clojure test-go test-shell
+
+test-shell: $(SHELLCHECK)
+	$(SHELLCHECK) util/release
 
 test-clojure: $(SOURCE-STAMP) $(BB)
 	$(BB) -cp src:test:$(if $(YAML_PARSER_DIR),$(YAML_PARSER_DIR)/src,.cache/src) \
@@ -85,3 +99,16 @@ test-race: $(GO) $(WORK-DEP)
 test-jvm: $(CLOJURE)
 	CLJ_CONFIG=$(LOCAL-HOME)/.clojure $(CLOJURE) \
 	  -M$(if $(YAML_PARSER_DIR),:dev):test
+
+release-check: test test-jvm test-race check-generated
+	grep -Fxq 'const Version = "$(VERSION)"' parser/parser.go
+	grep -Fxq '(def version "$(VERSION)")' $(SOURCE)
+	grep -Fq '(defproject org.yamlstar/yamlstar-plugin-parser-json-comments "$(VERSION)"' project.clj
+	GOWORK=off $(GO) test ./...
+
+release: release-check $(GH)
+	RELEASE_VERSION=$(VERSION) \
+	RELEASE_REPO=yamlstar/yamlstar-plugin-parser-json-comments \
+	RELEASE_DRY_RUN=$(d) \
+	GH=$(GH) \
+	util/release $(v)
