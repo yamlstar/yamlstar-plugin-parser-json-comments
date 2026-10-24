@@ -1463,7 +1463,7 @@ func LoadNS() {
 	// version
 	{
 		tmp0 := sym_version
-		var_yamlstar_DASH_plugin_DOT_parser_DOT_json_DASH_comments_version = ns.InternWithValue(tmp0, "0.1.0", true)
+		var_yamlstar_DASH_plugin_DOT_parser_DOT_json_DASH_comments_version = ns.InternWithValue(tmp0, "0.1.1", true)
 		var_yamlstar_DASH_plugin_DOT_parser_DOT_json_DASH_comments_version.SetMetaLazyMacro(func() lang.IPersistentMap {
 			return lang.NewMap(kw_file, "yamlstar_plugin/parser/json_comments.glj", kw_line, int(9), kw_column, int(6), kw_end_DASH_line, int(9), kw_end_DASH_column, int(12), kw_ns, lang.FindOrCreateNamespace(sym_yamlstar_DASH_plugin_DOT_parser_DOT_json_DASH_comments))
 		}, false)

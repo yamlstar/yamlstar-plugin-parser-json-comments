@@ -1,4 +1,4 @@
-(defproject org.yamlstar/yamlstar-plugin-parser-json-comments "0.1.0"
+(defproject org.yamlstar/yamlstar-plugin-parser-json-comments "0.1.1"
   :description "JSON-style comments as YAML parser productions"
   :url "https://github.com/yamlstar/yamlstar-plugin-parser-json-comments"
   :license {:name "MIT"}

@@ -21,7 +21,7 @@ include $M/clean.mk
 include $M/shellcheck.mk
 include $M/shell.mk
 
-VERSION := 0.1.0
+VERSION := 0.1.1
 ifneq (,$(filter release,$(MAKECMDGOALS)))
 ifeq (,$(strip $(v)))
 $(error 'make release' requires v=VERSION)

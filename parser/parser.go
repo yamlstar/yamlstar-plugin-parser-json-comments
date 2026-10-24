@@ -6,7 +6,7 @@ import (
 	reference "github.com/yamlstar/yamlstar-plugin-parser-reference/parser"
 )
 
-const Version = "0.1.0"
+const Version = "0.1.1"
 
 // Event describes one YAML parser event.
 type Event = reference.Event

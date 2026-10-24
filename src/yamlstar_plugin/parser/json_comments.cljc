@@ -6,7 +6,7 @@
             [yaml-parser.prelude :refer [p-get p-set!]]
             [yaml-parser.receiver :as receiver]))
 
-(def version "0.1.0")
+(def version "0.1.1")
 
 (defn- source [parser]
   #?(:glj (p-get parser :chars) :default (p-get parser :input)))
