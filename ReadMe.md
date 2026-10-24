@@ -16,7 +16,7 @@ events, err := parser.Parse([]byte("answer: true// comment"))
 (parser/parse "answer: true// comment")
 ```
 
-Select `--plugin=parser=json-comments` in the YAMLStar CLI.
+Select `--plugin=yaml-parser=json-comments` in the YAMLStar CLI.
 For go-yaml, use `--plugin=yaml-parser=json-comments`.
 For YAMLStar Python, use `yamlstar.parser('json-comments')`.
 
