@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// Mock both publication tools so these tests cannot contact a real remote.
+// Mock publication tools and credential lookup so tests never use real remotes.
 func TestMain(m *testing.M) {
 	if state := os.Getenv("JSON_COMMENTS_RELEASE_TEST_STATE"); state != "" {
 		os.Exit(mockReleaseCommand(state))
@@ -78,6 +78,66 @@ func mockReleaseCommand(path string) int {
 				panic(err)
 			}
 		}
+	case strings.HasPrefix(command, "curl "):
+		artifact := "https://repo.clojars.org/org/yamlstar/" +
+			"yamlstar-plugin-parser-json-comments/0.1.0/" +
+			"yamlstar-plugin-parser-json-comments-0.1.0"
+		if !strings.HasSuffix(command, artifact+".pom") &&
+			!strings.HasSuffix(command, artifact+".jar") {
+			fmt.Fprintln(os.Stderr, "Unexpected Clojars URL")
+			return 99
+		}
+		if state["check-fails"] == "1" {
+			return 7
+		}
+		status := state["http-status"]
+		if status == "" {
+			status = "404"
+			if state["clojars"] == "1" ||
+				(state["incomplete"] == "1" && strings.HasSuffix(command, ".pom")) {
+				status = "200"
+			}
+		}
+		fmt.Print(status)
+	case command == "lein deploy releases":
+		if state["deploy-fails"] == "1" {
+			return 1
+		}
+		user, token := "fixture-user", "fixture-token"
+		if expected := state["expected-user"]; expected != "" {
+			user = expected
+		}
+		if expected := state["expected-token"]; expected != "" {
+			token = expected
+		}
+		if os.Getenv("CLOJARS_USERNAME") != user ||
+			os.Getenv("CLOJARS_PASSWORD") != token {
+			fmt.Fprintln(os.Stderr, "Incorrect deployment credentials")
+			return 99
+		}
+		if state["missing-artifact"] != "1" {
+			state["clojars"] = "1"
+			data, err := json.Marshal(state)
+			if err != nil {
+				panic(err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				panic(err)
+			}
+		}
+	case strings.HasPrefix(command, "ys -e "):
+		if state["ys-fails"] == "1" {
+			return 1
+		}
+		switch os.Args[2] {
+		case "print: _.clojars.user || ''":
+			fmt.Print(state["file-user"])
+		case "print: _.clojars.token || ''":
+			fmt.Print(state["file-token"])
+		default:
+			fmt.Fprintln(os.Stderr, "Unexpected credential selector")
+			return 99
+		}
 	default:
 		fmt.Fprintln(os.Stderr, "Unexpected release command:", command)
 		return 99
@@ -97,13 +157,40 @@ func TestRelease(t *testing.T) {
 	for _, tc := range []struct {
 		name, version, dry, message string
 		state                       map[string]string
-		pushes, creates             int
+		pushes, creates, deploys    int
 	}{
-		{name: "release", version: "0.1.0", creates: 1},
+		{name: "release", version: "0.1.0", deploys: 1, creates: 1},
 		{name: "publish ahead", version: "0.1.0",
-			state: map[string]string{"remote": "older"}, pushes: 1, creates: 1},
+			state:   map[string]string{"remote": "older"},
+			deploys: 1, pushes: 1, creates: 1},
+		{name: "Clojars already published", version: "0.1.0", creates: 1,
+			state: map[string]string{
+				"clojars": "1", "no-user": "1", "no-token": "1",
+			}},
+		{name: "credentials from YAMLStar secrets", version: "0.1.0",
+			deploys: 1, creates: 1,
+			state: map[string]string{
+				"secrets-file": "1", "no-user": "1", "no-token": "1",
+				"file-user": "yamlstar-user", "file-token": "yamlstar-token",
+				"expected-user": "yamlstar-user", "expected-token": "yamlstar-token",
+			}},
+		{name: "environment credentials take precedence", version: "0.1.0",
+			deploys: 1, creates: 1,
+			state: map[string]string{
+				"secrets-file": "1", "file-user": "other", "file-token": "other",
+			}},
+		{name: "partial environment credentials", version: "0.1.0",
+			deploys: 1, creates: 1,
+			state: map[string]string{
+				"secrets-file": "1", "no-token": "1", "file-user": "other",
+				"file-token": "yamlstar-token", "expected-token": "yamlstar-token",
+			}},
 		{name: "dry run", version: "0.1.0", dry: "1",
-			state: map[string]string{"remote": "older"}},
+			state: map[string]string{
+				"remote": "older", "no-user": "1", "no-token": "1",
+			}},
+		{name: "dry run existing Clojars version", version: "0.1.0", dry: "1",
+			state: map[string]string{"clojars": "1"}},
 		{name: "missing version", message: "Usage:"},
 		{name: "invalid version", version: "v0.1.0", message: "form X.Y.Z"},
 		{name: "version mismatch", version: "0.2.0", message: "does not match"},
@@ -119,17 +206,37 @@ func TestRelease(t *testing.T) {
 			state: map[string]string{"tag": "1"}},
 		{name: "existing release", version: "0.1.0", message: "already exists",
 			state: map[string]string{"release": "1"}},
+		{name: "missing Clojars user", version: "0.1.0", message: "CLOJARS_USERNAME",
+			state: map[string]string{"no-user": "1"}},
+		{name: "missing Clojars token", version: "0.1.0", message: "CLOJARS_PASSWORD",
+			state: map[string]string{"no-token": "1"}},
+		{name: "missing secrets entry", version: "0.1.0", message: "CLOJARS_PASSWORD",
+			state: map[string]string{"secrets-file": "1", "no-token": "1"}},
+		{name: "credential lookup failure", version: "0.1.0", message: "Could not read",
+			state: map[string]string{
+				"secrets-file": "1", "no-token": "1", "ys-fails": "1",
+			}},
+		{name: "Clojars check failure", version: "0.1.0", message: "Could not check",
+			state: map[string]string{"check-fails": "1"}},
+		{name: "Clojars HTTP error", version: "0.1.0", message: "HTTP 503",
+			state: map[string]string{"http-status": "503"}},
+		{name: "incomplete Clojars version", version: "0.1.0", message: "Incomplete",
+			state: map[string]string{"incomplete": "1"}},
+		{name: "Clojars deployment failure", version: "0.1.0", message: "exit status",
+			state: map[string]string{"deploy-fails": "1"}, deploys: 1},
+		{name: "missing published artifact", version: "0.1.0", message: "did not publish",
+			state: map[string]string{"missing-artifact": "1"}, deploys: 1},
 		{name: "publication failure", version: "0.1.0", message: "exit status",
-			state:  map[string]string{"remote": "older", "push-fails": "1"},
-			pushes: 1},
+			state:   map[string]string{"remote": "older", "push-fails": "1"},
+			deploys: 1, pushes: 1},
 		{name: "release failure", version: "0.1.0", message: "exit status",
-			state: map[string]string{"create-fails": "1"}, creates: 1},
+			state: map[string]string{"create-fails": "1"}, deploys: 1, creates: 1},
 		{name: "missing created tag", version: "0.1.0", message: "did not create",
-			state: map[string]string{"missing-tag": "1"}, creates: 1},
+			state: map[string]string{"missing-tag": "1"}, deploys: 1, creates: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			for _, tool := range []string{"git", "gh"} {
+			for _, tool := range []string{"git", "gh", "curl", "lein", "ys"} {
 				if err := os.Symlink(executable, filepath.Join(dir, tool)); err != nil {
 					t.Fatal(err)
 				}
@@ -148,6 +255,19 @@ func TestRelease(t *testing.T) {
 			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
+			secrets := filepath.Join(dir, "secrets.yaml")
+			if state["secrets-file"] == "1" {
+				if err := os.WriteFile(secrets, []byte("clojars: {}\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			user, token := "fixture-user", "fixture-token"
+			if state["no-user"] == "1" {
+				user = ""
+			}
+			if state["no-token"] == "1" {
+				token = ""
+			}
 			args := []string{script}
 			if tc.version != "" {
 				args = append(args, tc.version)
@@ -157,11 +277,21 @@ func TestRelease(t *testing.T) {
 			cmd.Env = append(os.Environ(),
 				"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
 				"GH="+filepath.Join(dir, "gh"),
+				"LEIN="+filepath.Join(dir, "lein"),
+				"CURL="+filepath.Join(dir, "curl"),
+				"YS="+filepath.Join(dir, "ys"),
+				"YAMLSTAR_SECRETS_FILE="+secrets,
+				"CLOJARS_USERNAME="+user, "CLOJARS_PASSWORD="+token,
 				"RELEASE_VERSION=0.1.0", "RELEASE_DRY_RUN="+tc.dry,
 				"GORACE=atexit_sleep_ms=0",
 				"RELEASE_REPO=yamlstar/yamlstar-plugin-parser-json-comments",
 				"JSON_COMMENTS_RELEASE_TEST_STATE="+path)
 			output, err := cmd.CombinedOutput()
+			for _, token := range []string{"fixture-token", "yamlstar-token"} {
+				if strings.Contains(string(output), token) {
+					t.Fatal("release output exposed a credential")
+				}
+			}
 			if tc.message == "" {
 				if err != nil {
 					t.Fatalf("release: %v\n%s", err, output)
@@ -176,8 +306,21 @@ func TestRelease(t *testing.T) {
 			}
 			log := string(commands)
 			if strings.Count(log, "git push ") != tc.pushes ||
-				strings.Count(log, "gh release create ") != tc.creates {
+				strings.Count(log, "gh release create ") != tc.creates ||
+				strings.Count(log, "lein deploy releases") != tc.deploys {
 				t.Fatalf("unexpected publication commands:\n%s", log)
+			}
+			if tc.deploys > 0 {
+				deploy := strings.Index(log, "lein deploy releases")
+				for _, mutation := range []string{"git push ", "gh release create "} {
+					if next := strings.Index(log, mutation); next >= 0 && next < deploy {
+						t.Fatalf("GitHub publication preceded Clojars:\n%s", log)
+					}
+				}
+			}
+			if state["secrets-file"] == "1" && user != "" && token != "" &&
+				strings.Contains(log, "ys -e ") {
+				t.Fatal("file lookup overrode complete environment credentials")
 			}
 			if tc.creates > 0 && !strings.Contains(log,
 				"gh release create v0.1.0 --repo "+
@@ -186,6 +329,10 @@ func TestRelease(t *testing.T) {
 			}
 			if tc.dry != "" && !strings.Contains(string(output), "Would create v0.1.0") {
 				t.Fatalf("missing dry-run preview: %s", output)
+			}
+			if tc.dry != "" && state["clojars"] != "1" &&
+				!strings.Contains(string(output), "to Clojars") {
+				t.Fatalf("missing Clojars dry-run preview: %s", output)
 			}
 		})
 	}

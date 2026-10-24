@@ -7,12 +7,15 @@ $(shell test -d $M || { \
 GO-VERSION := 1.27.1
 GLOAT-VERSION := 0.1.80
 JAVA-VERSION := 27
+YAMLSCRIPT-VERSION := 0.2.32
 include $M/init.mk
 include $M/go.mk
 include $M/gh.mk
 include $M/gloat.mk
 include $M/babashka.mk
 include $M/clojure.mk
+include $M/lein.mk
+include $M/yamlscript.mk
 include $M/clean.mk
 include $M/shellcheck.mk
 include $M/shell.mk
@@ -106,9 +109,11 @@ release-check: test test-jvm test-race check-generated
 	grep -Fq '(defproject org.yamlstar/yamlstar-plugin-parser-json-comments "$(VERSION)"' project.clj
 	GOWORK=off $(GO) test ./...
 
-release: release-check $(GH)
+release: release-check $(GH) $(LEIN) $(YS)
 	RELEASE_VERSION=$(VERSION) \
 	RELEASE_REPO=yamlstar/yamlstar-plugin-parser-json-comments \
 	RELEASE_DRY_RUN=$(d) \
 	GH=$(GH) \
+	LEIN=$(LEIN) \
+	YS=$(YS) \
 	util/release $(v)

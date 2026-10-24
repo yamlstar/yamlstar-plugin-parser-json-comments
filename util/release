@@ -6,11 +6,50 @@ version=${1:?Usage: util/release VERSION}
 expected=${RELEASE_VERSION:?RELEASE_VERSION must be set}
 repo=${RELEASE_REPO:-yamlstar/yamlstar-plugin-parser-json-comments}
 gh=${GH:-gh}
+lein=${LEIN:-lein}
+ys=${YS:-ys}
+curl=${CURL:-curl}
 dry_run=${RELEASE_DRY_RUN:-}
+secrets_file=${YAMLSTAR_SECRETS_FILE:-$HOME/.yamlstar-secrets.yaml}
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+clojars_published() {
+  local extension status found=0
+  for extension in pom jar; do
+    status=$("$curl" --location --silent --show-error --output /dev/null \
+      --write-out '%{http_code}' "$artifact.$extension") ||
+      die 'Could not check the Clojars publication'
+    case $status in
+      200) found=$((found + 1)) ;;
+      404) ;;
+      *) die "Could not check Clojars: HTTP $status" ;;
+    esac
+  done
+  (( found != 1 )) || die 'Incomplete Clojars publication: JAR or POM missing'
+  (( found == 2 ))
+}
+
+clojars_credentials() {
+  if [[ -f $secrets_file ]]; then
+    if [[ -z ${CLOJARS_USERNAME:-} ]]; then
+      CLOJARS_USERNAME=$("$ys" -e "print: _.clojars.user || ''" \
+        "$secrets_file" 2>/dev/null) ||
+        die "Could not read the Clojars username from $secrets_file"
+    fi
+    if [[ -z ${CLOJARS_PASSWORD:-} ]]; then
+      CLOJARS_PASSWORD=$("$ys" -e "print: _.clojars.token || ''" \
+        "$secrets_file" 2>/dev/null) ||
+        die "Could not read the Clojars token from $secrets_file"
+    fi
+  fi
+  [[ -n ${CLOJARS_USERNAME:-} && -n ${CLOJARS_PASSWORD:-} ]] ||
+    die 'Set CLOJARS_USERNAME/CLOJARS_PASSWORD or' \
+      'clojars.user/clojars.token in ~/.yamlstar-secrets.yaml'
+  export CLOJARS_USERNAME CLOJARS_PASSWORD
 }
 
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
@@ -40,12 +79,35 @@ if "$gh" release view "$tag" --repo "$repo" >/dev/null 2>&1; then
   die "GitHub release $tag already exists"
 fi
 
+artifact=https://repo.clojars.org/org/yamlstar
+artifact=$artifact/yamlstar-plugin-parser-json-comments/$version
+artifact=$artifact/yamlstar-plugin-parser-json-comments-$version
+published=false
+if clojars_published; then
+  published=true
+fi
+
 if [[ -n $dry_run ]]; then
+  if $published; then
+    printf 'Clojars version %s is already published\n' "$version"
+  else
+    printf 'Would publish %s %s to Clojars\n' \
+      org.yamlstar/yamlstar-plugin-parser-json-comments "$version"
+  fi
   if [[ $head != "$remote_head" ]]; then
     printf 'Would publish main at %s\n' "$head"
   fi
   printf 'Would create %s at %s in %s\n' "$tag" "$head" "$repo"
   exit 0
+fi
+
+if $published; then
+  printf 'Clojars version %s is already published; skipping deployment\n' \
+    "$version"
+else
+  clojars_credentials
+  "$lein" deploy releases
+  clojars_published || die 'Clojars did not publish both the JAR and POM'
 fi
 
 if [[ $head != "$remote_head" ]]; then
@@ -61,4 +123,4 @@ fi
 
 git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null ||
   die "GitHub did not create tag $tag"
-printf 'Released %s at %s\n' "$tag" "$head"
+printf 'Released %s to Clojars and GitHub at %s\n' "$tag" "$head"

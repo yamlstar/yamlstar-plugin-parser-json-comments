@@ -121,21 +121,44 @@ plugin and updating downstream release builds.
 
 ## Release
 
-From a clean `main` containing the changes to publish, run:
+Update all version declarations and regenerate Go code before releasing a new
+version.
+From a clean `main` containing the changes to publish, run, for example:
 
 ```bash
-make release v=0.1.0
+make release v=0.1.1
 ```
 
 The target runs the Clojure, JVM, Go, race, and shell checks, verifies generated
 code and version declarations, and tests the Go module against its published
 dependencies with local workspace replacements disabled.
-It publishes `main` when it is ahead of the remote, then creates the `v0.1.0`
+It deploys the JVM JAR and POM to Clojars and verifies that both are available.
+It then publishes `main` when it is ahead of the remote and creates the matching
 tag and GitHub release at that commit.
 The same tag includes the `goyaml` adapter; no binary assets are needed.
 
-The release requires GitHub authentication with permission to create releases.
+Credentials follow YAMLStar's Clojure release convention.
+`CLOJARS_USERNAME` and `CLOJARS_PASSWORD` take precedence.
+Missing values come from `~/.yamlstar-secrets.yaml`:
+
+```yaml
+clojars:
+  user: your-clojars-username
+  token: your-clojars-deploy-token
+```
+
+`CLOJARS_PASSWORD` contains a Clojars deploy token.
+Set `YAMLSTAR_SECRETS_FILE` to read a different secrets file.
+Makes installs Leiningen and the YAMLScript reader used for credential lookup.
+The release also requires GitHub authentication with permission to create
+releases.
 Existing remote tags and releases, a dirty tree, a different branch, or a
 divergent remote `main` cause it to stop.
-Use `make release v=0.1.0 d=1` to run the checks and preview the publication
-without changing the remote.
+If Clojars succeeds but a later step fails, retry the same release from the
+same source commit.
+A complete existing Clojars version is reused without redeployment.
+Incomplete artifacts, repository errors, and deployment failures stop the
+release before GitHub publication.
+Use `make release v=0.1.1 d=1` to run the checks and preview both publications
+without uploading artifacts or changing the remote.
+The dry run does not require Clojars credentials.

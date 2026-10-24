@@ -4,4 +4,9 @@
   :license {:name "MIT"}
   :dependencies [[org.clojure/clojure "1.12.0"]
                  [org.yamlstar/yaml-parser "0.2.6"]]
-  :source-paths ["src"])
+  :source-paths ["src"]
+  :deploy-repositories
+  [["releases" {:url "https://repo.clojars.org"
+                :username :env/clojars_username
+                :password :env/clojars_password
+                :sign-releases false}]])
