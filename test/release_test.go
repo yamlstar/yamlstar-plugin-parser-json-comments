@@ -51,12 +51,29 @@ func mockReleaseCommand(path string) int {
 		if state["diverged"] == "1" {
 			return 1
 		}
-	case command == "git ls-remote --exit-code --tags origin refs/tags/v0.1.0":
+	case command == "git ls-remote --exit-code --tags origin refs/tags/v"+state["version"]:
 		if state["tag"] != "1" {
 			return 2
 		}
-		fmt.Printf("%s\trefs/tags/v0.1.0\n", state["head"])
-	case command == "git push origin HEAD:main":
+		fmt.Printf("%s\trefs/tags/v%s\n", state["head"], state["version"])
+	case strings.HasPrefix(command, "git add "):
+	case strings.HasPrefix(command, "git commit "):
+		if state["commit-fails"] == "1" {
+			return 1
+		}
+		state["head"] = "release-commit"
+		data, err := json.Marshal(state)
+		if err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			panic(err)
+		}
+	case strings.HasPrefix(command, "git push origin HEAD:"):
+		if command != "git push origin HEAD:"+state["branch"] {
+			fmt.Fprintln(os.Stderr, "Unexpected publication branch")
+			return 99
+		}
 		if state["push-fails"] == "1" {
 			return 1
 		}
@@ -80,8 +97,8 @@ func mockReleaseCommand(path string) int {
 		}
 	case strings.HasPrefix(command, "curl "):
 		artifact := "https://repo.clojars.org/org/yamlstar/" +
-			"yamlstar-plugin-parser-json-comments/0.1.0/" +
-			"yamlstar-plugin-parser-json-comments-0.1.0"
+			"yamlstar-plugin-parser-json-comments/" + state["version"] + "/" +
+			"yamlstar-plugin-parser-json-comments-" + state["version"]
 		if !strings.HasSuffix(command, artifact+".pom") &&
 			!strings.HasSuffix(command, artifact+".jar") {
 			fmt.Fprintln(os.Stderr, "Unexpected Clojars URL")
@@ -99,6 +116,26 @@ func mockReleaseCommand(path string) int {
 			}
 		}
 		fmt.Print(status)
+	case command == "make generate":
+		if state["generate-fails"] == "1" {
+			return 1
+		}
+		if err := os.WriteFile(releaseGenerated, []byte("// Regenerated\n"), 0o644); err != nil {
+			panic(err)
+		}
+	case command == "make release-check":
+		if state["checks-fail"] == "1" {
+			return 1
+		}
+		if state["old"] != "" {
+			for file, text := range releaseSources(state["version"]) {
+				got, err := os.ReadFile(file)
+				if err != nil || string(got) != text {
+					fmt.Fprintln(os.Stderr, "Incorrect version in", file)
+					return 99
+				}
+			}
+		}
 	case command == "lein deploy releases":
 		if state["deploy-fails"] == "1" {
 			return 1
@@ -130,9 +167,9 @@ func mockReleaseCommand(path string) int {
 			return 1
 		}
 		switch os.Args[2] {
-		case "print: _.clojars.user || ''":
+		case "print: _.clojure.user || ''":
 			fmt.Print(state["file-user"])
-		case "print: _.clojars.token || ''":
+		case "print: _.clojure.token || ''":
 			fmt.Print(state["file-token"])
 		default:
 			fmt.Fprintln(os.Stderr, "Unexpected credential selector")
@@ -145,6 +182,17 @@ func mockReleaseCommand(path string) int {
 	return 0
 }
 
+const releaseGenerated = "internal/glojure/pkg/yamlstar_plugin/parser/json_comments/loader.go"
+
+func releaseSources(version string) map[string]string {
+	return map[string]string{
+		"Makefile":         "VERSION := " + version + "\nOTHER_VERSION := 0.1.0\n",
+		"project.clj":      "(defproject org.yamlstar/yamlstar-plugin-parser-json-comments \"" + version + "\"\n)",
+		"parser/parser.go": "package parser\n\nconst Version = \"" + version + "\"\n",
+		"src/yamlstar_plugin/parser/json_comments.cljc": "(ns json-comments)\n(def version \"" + version + "\")\n",
+	}
+}
+
 func TestRelease(t *testing.T) {
 	script, err := filepath.Abs("../util/release")
 	if err != nil {
@@ -154,11 +202,55 @@ func TestRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	perl, err := exec.LookPath("perl")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
-		name, version, dry, message string
-		state                       map[string]string
-		pushes, creates, deploys    int
+		name, version, old, source, dry, allow, message string
+		state                                           map[string]string
+		pushes, creates, deploys, commits, generates    int
 	}{
+		{name: "bump and release", old: "0.1.0", version: "0.1.1",
+			deploys: 1, commits: 1, generates: 1, pushes: 1, creates: 1},
+		{name: "bump dry run", old: "0.1.0", version: "0.1.1", dry: "1"},
+		{name: "bump dry run on another branch", old: "0.1.0", version: "0.1.1",
+			dry: "1", allow: "1", state: map[string]string{"branch": "development"}},
+		{name: "bump requires main", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"branch": "development"}, message: "set a=1"},
+		{name: "bump requires clean tree", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"dirty": "1"}, message: "not clean"},
+		{name: "bump requires new tag", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"tag": "1"}, message: "already exists"},
+		{name: "bump requires credentials", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"no-token": "1"}, message: "CLOJARS_PASSWORD"},
+		{name: "release from another branch", old: "0.1.0", version: "0.1.1",
+			allow: "1", state: map[string]string{"branch": "development"},
+			deploys: 1, commits: 1, generates: 1, pushes: 1, creates: 1},
+		{name: "unchanged version on another branch", version: "0.1.0",
+			allow: "1", state: map[string]string{"branch": "development"},
+			deploys: 1, pushes: 1, creates: 1},
+		{name: "retry after release commit", old: "0.1.0", source: "0.1.1",
+			version: "0.1.1", state: map[string]string{"clojars": "1"}, creates: 1},
+		{name: "invalid old version", old: "v0.1.0", version: "0.1.1",
+			message: "Old version must have"},
+		{name: "incorrect old version", old: "0.0.9", version: "0.1.1",
+			message: "Old version 0.0.9 does not match"},
+		{name: "inconsistent source versions", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"inconsistent": "1"}, message: "Source version"},
+		{name: "bump to existing Clojars version", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"clojars": "1"}, message: "choose a new version"},
+		{name: "generation failure", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"generate-fails": "1"}, generates: 1,
+			message: "exit status"},
+		{name: "release checks failure", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"checks-fail": "1"}, generates: 1,
+			message: "exit status"},
+		{name: "release commit failure", old: "0.1.0", version: "0.1.1",
+			state: map[string]string{"commit-fails": "1"}, generates: 1, commits: 1,
+			message: "exit status"},
+		{name: "detached HEAD", version: "0.1.0", allow: "1",
+			state: map[string]string{"branch": ""}, message: "detached HEAD"},
 		{name: "release", version: "0.1.0", deploys: 1, creates: 1},
 		{name: "publish ahead", version: "0.1.0",
 			state:   map[string]string{"remote": "older"},
@@ -236,16 +328,38 @@ func TestRelease(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			for _, tool := range []string{"git", "gh", "curl", "lein", "ys"} {
+			for _, tool := range []string{"git", "gh", "curl", "lein", "ys", "make"} {
 				if err := os.Symlink(executable, filepath.Join(dir, tool)); err != nil {
 					t.Fatal(err)
 				}
 			}
 			state := map[string]string{
 				"branch": "main", "head": "current", "remote": "current",
+				"version": tc.version, "old": tc.old,
 			}
 			for key, value := range tc.state {
 				state[key] = value
+			}
+			source := tc.source
+			if source == "" {
+				source = "0.1.0"
+			}
+			var files map[string]string
+			if tc.old != "" {
+				files = releaseSources(source)
+				files[releaseGenerated] = "// Original\n"
+				if state["inconsistent"] == "1" {
+					files["parser/parser.go"] = "const Version = \"9.9.9\"\n"
+				}
+				for file, text := range files {
+					path := filepath.Join(dir, file)
+					if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			data, err := json.Marshal(state)
 			if err != nil {
@@ -257,7 +371,7 @@ func TestRelease(t *testing.T) {
 			}
 			secrets := filepath.Join(dir, "secrets.yaml")
 			if state["secrets-file"] == "1" {
-				if err := os.WriteFile(secrets, []byte("clojars: {}\n"), 0o600); err != nil {
+				if err := os.WriteFile(secrets, []byte("clojure: {}\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -280,13 +394,23 @@ func TestRelease(t *testing.T) {
 				"LEIN="+filepath.Join(dir, "lein"),
 				"CURL="+filepath.Join(dir, "curl"),
 				"YS="+filepath.Join(dir, "ys"),
+				"PERL="+perl, "RELEASE_MAKE="+filepath.Join(dir, "make"),
+				"RELEASE_OLD_VERSION="+tc.old, "RELEASE_ALLOW_BRANCH="+tc.allow,
 				"YAMLSTAR_SECRETS_FILE="+secrets,
 				"CLOJARS_USERNAME="+user, "CLOJARS_PASSWORD="+token,
-				"RELEASE_VERSION=0.1.0", "RELEASE_DRY_RUN="+tc.dry,
+				"RELEASE_VERSION="+source, "RELEASE_DRY_RUN="+tc.dry,
 				"GORACE=atexit_sleep_ms=0",
 				"RELEASE_REPO=yamlstar/yamlstar-plugin-parser-json-comments",
 				"JSON_COMMENTS_RELEASE_TEST_STATE="+path)
 			output, err := cmd.CombinedOutput()
+			if tc.generates == 0 {
+				for file, text := range files {
+					got, err := os.ReadFile(filepath.Join(dir, file))
+					if err != nil || string(got) != text {
+						t.Fatalf("preflight or dry run changed %s", file)
+					}
+				}
+			}
 			for _, token := range []string{"fixture-token", "yamlstar-token"} {
 				if strings.Contains(string(output), token) {
 					t.Fatal("release output exposed a credential")
@@ -307,11 +431,32 @@ func TestRelease(t *testing.T) {
 			log := string(commands)
 			if strings.Count(log, "git push ") != tc.pushes ||
 				strings.Count(log, "gh release create ") != tc.creates ||
-				strings.Count(log, "lein deploy releases") != tc.deploys {
+				strings.Count(log, "lein deploy releases") != tc.deploys ||
+				strings.Count(log, "git commit ") != tc.commits ||
+				strings.Count(log, "make generate") != tc.generates {
 				t.Fatalf("unexpected publication commands:\n%s", log)
+			}
+			if tc.commits > 0 {
+				generate := strings.Index(log, "make generate")
+				checks := strings.Index(log, "make release-check")
+				commit := strings.Index(log, "git commit ")
+				if generate < 0 || checks < generate || commit < checks {
+					t.Fatalf("release commit preceded generation or checks:\n%s", log)
+				}
+				if !strings.Contains(log, "git add Makefile project.clj parser/parser.go "+
+					"src/yamlstar_plugin/parser/json_comments.cljc "+releaseGenerated+"\n") {
+					t.Fatalf("unexpected release commit files:\n%s", log)
+				}
 			}
 			if tc.deploys > 0 {
 				deploy := strings.Index(log, "lein deploy releases")
+				checks := strings.Index(log, "make release-check")
+				if checks < 0 || checks > deploy {
+					t.Fatalf("deployment preceded release checks:\n%s", log)
+				}
+				if tc.commits > 0 && strings.Index(log, "git commit ") > deploy {
+					t.Fatalf("deployment preceded release commit:\n%s", log)
+				}
 				for _, mutation := range []string{"git push ", "gh release create "} {
 					if next := strings.Index(log, mutation); next >= 0 && next < deploy {
 						t.Fatalf("GitHub publication preceded Clojars:\n%s", log)
@@ -322,12 +467,16 @@ func TestRelease(t *testing.T) {
 				strings.Contains(log, "ys -e ") {
 				t.Fatal("file lookup overrode complete environment credentials")
 			}
+			target := "current"
+			if tc.commits > 0 {
+				target = "release-commit"
+			}
 			if tc.creates > 0 && !strings.Contains(log,
-				"gh release create v0.1.0 --repo "+
-					"yamlstar/yamlstar-plugin-parser-json-comments --target current ") {
+				"gh release create v"+tc.version+" --repo "+
+					"yamlstar/yamlstar-plugin-parser-json-comments --target "+target+" ") {
 				t.Fatalf("wrong release target:\n%s", log)
 			}
-			if tc.dry != "" && !strings.Contains(string(output), "Would create v0.1.0") {
+			if tc.dry != "" && !strings.Contains(string(output), "Would create v"+tc.version) {
 				t.Fatalf("missing dry-run preview: %s", output)
 			}
 			if tc.dry != "" && state["clojars"] != "1" &&

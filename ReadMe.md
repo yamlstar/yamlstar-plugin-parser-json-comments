@@ -121,28 +121,32 @@ plugin and updating downstream release builds.
 
 ## Release
 
-Update all version declarations and regenerate Go code before releasing a new
-version.
 From a clean `main` containing the changes to publish, run, for example:
 
 ```bash
-make release v=0.1.1
+make release o=0.1.0 v=0.1.1
 ```
 
-The target runs the Clojure, JVM, Go, race, and shell checks, verifies generated
-code and version declarations, and tests the Go module against its published
+The target checks the old version, updates the source version declarations,
+and regenerates Go code.
+It runs the Clojure, JVM, Go, race, and shell checks, verifies generated code
+and version declarations, and tests the Go module against its published
 dependencies with local workspace replacements disabled.
+After those checks pass, it commits the version changes and generated code.
 It deploys the JVM JAR and POM to Clojars and verifies that both are available.
-It then publishes `main` when it is ahead of the remote and creates the matching
-tag and GitHub release at that commit.
+It then publishes the release branch and creates the matching tag and GitHub
+release at that commit.
 The same tag includes the `goyaml` adapter; no binary assets are needed.
+Use `make release v=0.1.1` when the source version is already committed.
+Add `a=1` to allow releasing from the current branch instead of `main`.
+The override publishes that branch and requires it to contain remote `main`.
 
 Credentials follow YAMLStar's Clojure release convention.
 `CLOJARS_USERNAME` and `CLOJARS_PASSWORD` take precedence.
 Missing values come from `~/.yamlstar-secrets.yaml`:
 
 ```yaml
-clojars:
+clojure:
   user: your-clojars-username
   token: your-clojars-deploy-token
 ```
@@ -152,13 +156,17 @@ Set `YAMLSTAR_SECRETS_FILE` to read a different secrets file.
 Makes installs Leiningen and the YAMLScript reader used for credential lookup.
 The release also requires GitHub authentication with permission to create
 releases.
-Existing remote tags and releases, a dirty tree, a different branch, or a
-divergent remote `main` cause it to stop.
+Existing remote tags and releases, a dirty tree, a different branch without
+`a=1`, or a divergent remote `main` cause it to stop.
 If Clojars succeeds but a later step fails, retry the same release from the
 same source commit.
 A complete existing Clojars version is reused without redeployment.
+The original command with `o=...` also accepts an already committed new version
+when retrying.
+An existing Clojars version cannot be used for a new version bump.
 Incomplete artifacts, repository errors, and deployment failures stop the
 release before GitHub publication.
-Use `make release v=0.1.1 d=1` to run the checks and preview both publications
-without uploading artifacts or changing the remote.
+Generation or validation failures leave version edits uncommitted for review.
+Use `make release o=0.1.0 v=0.1.1 d=1` to preview the preparation and both
+publications without editing source files, committing, or uploading artifacts.
 The dry run does not require Clojars credentials.

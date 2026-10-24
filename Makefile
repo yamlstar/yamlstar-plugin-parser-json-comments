@@ -15,6 +15,7 @@ include $M/gloat.mk
 include $M/babashka.mk
 include $M/clojure.mk
 include $M/lein.mk
+include $M/perl.mk
 include $M/yamlscript.mk
 include $M/clean.mk
 include $M/shellcheck.mk
@@ -25,13 +26,10 @@ ifneq (,$(filter release,$(MAKECMDGOALS)))
 ifeq (,$(strip $(v)))
 $(error 'make release' requires v=VERSION)
 endif
-ifneq ($(v),$(VERSION))
-$(error Requested version $(v) does not match source version $(VERSION))
-endif
 endif
 
 MODULE := github.com/yamlstar/yamlstar-plugin-parser-json-comments
-MAKES-CLEAN := target .cpcache .cache/generated .cache/src
+MAKES-CLEAN := target pom.xml .cpcache .cache/generated .cache/src
 YAML-PARSER-VERSION := 0.2.6
 YAML-PARSER-BASE := https://repo.clojars.org/org/yamlstar/yaml-parser
 YAML-PARSER-FILE := yaml-parser-$(YAML-PARSER-VERSION).jar
@@ -93,10 +91,10 @@ test-clojure: $(SOURCE-STAMP) $(BB)
 	$(BB) -cp src:test:$(if $(YAML_PARSER_DIR),$(YAML_PARSER_DIR)/src,.cache/src) \
 	  -m yamlstar-plugin.parser.json-comments-test
 
-test-go: $(GO) $(WORK-DEP)
+test-go: $(GO) $(PERL) $(WORK-DEP)
 	$(WORK-ENV) $(GO) test ./...
 
-test-race: $(GO) $(WORK-DEP)
+test-race: $(GO) $(PERL) $(WORK-DEP)
 	$(WORK-ENV) $(GO) test -race ./...
 
 test-jvm: $(CLOJURE)
@@ -109,11 +107,15 @@ release-check: test test-jvm test-race check-generated
 	grep -Fq '(defproject org.yamlstar/yamlstar-plugin-parser-json-comments "$(VERSION)"' project.clj
 	GOWORK=off $(GO) test ./...
 
-release: release-check $(GH) $(LEIN) $(YS)
+release: $(GH) $(LEIN) $(YS) $(PERL)
 	RELEASE_VERSION=$(VERSION) \
+	RELEASE_OLD_VERSION=$(o) \
+	RELEASE_ALLOW_BRANCH=$(a) \
+	RELEASE_MAKE='$(MAKE)' \
 	RELEASE_REPO=yamlstar/yamlstar-plugin-parser-json-comments \
 	RELEASE_DRY_RUN=$(d) \
 	GH=$(GH) \
 	LEIN=$(LEIN) \
 	YS=$(YS) \
+	PERL=$(PERL) \
 	util/release $(v)

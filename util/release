@@ -4,6 +4,10 @@ set -euo pipefail
 
 version=${1:?Usage: util/release VERSION}
 expected=${RELEASE_VERSION:?RELEASE_VERSION must be set}
+old_version=${RELEASE_OLD_VERSION:-}
+allow_branch=${RELEASE_ALLOW_BRANCH:-}
+make=${RELEASE_MAKE:-make}
+perl=${PERL:-perl}
 repo=${RELEASE_REPO:-yamlstar/yamlstar-plugin-parser-json-comments}
 gh=${GH:-gh}
 lein=${LEIN:-lein}
@@ -11,10 +15,51 @@ ys=${YS:-ys}
 curl=${CURL:-curl}
 dry_run=${RELEASE_DRY_RUN:-}
 secrets_file=${YAMLSTAR_SECRETS_FILE:-$HOME/.yamlstar-secrets.yaml}
+version_files=(Makefile project.clj parser/parser.go
+  src/yamlstar_plugin/parser/json_comments.cljc)
+generated=internal/glojure/pkg/yamlstar_plugin/parser/json_comments/loader.go
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+source_versions() {
+  # shellcheck disable=SC2016
+  RELEASE_SOURCE_VERSION=$expected RELEASE_TARGET_VERSION=$version \
+    "$perl" - "$1" <<'PERL'
+use strict;
+use warnings;
+my $mode = shift @ARGV;
+my $old = $ENV{RELEASE_SOURCE_VERSION};
+my $new = $ENV{RELEASE_TARGET_VERSION};
+my @files = (
+  ['Makefile', qr/^(VERSION := )(\S+)$/m],
+  ['project.clj',
+    qr/^(\(defproject org.yamlstar\/yamlstar-plugin-parser-json-comments ")([^"\n]+)(")/m],
+  ['parser/parser.go', qr/^(const Version = ")([^"\n]+)(")$/m],
+  ['src/yamlstar_plugin/parser/json_comments.cljc',
+    qr/^(\(def version ")([^"\n]+)("\))$/m],
+);
+for my $file (@files) {
+  my ($path, $pattern) = @$file;
+  open my $in, '<', $path or die "Cannot read $path: $!\n";
+  local $/;
+  my $text = <$in>;
+  close $in;
+  $text =~ $pattern && $2 eq $old
+    or die "Source version in $path does not match $old\n";
+  $text =~ s/$pattern/$1 . $new . (defined $3 ? $3 : '')/e;
+  push @$file, $text;
+}
+if ($mode eq 'bump') {
+  for my $file (@files) {
+    open my $out, '>', $file->[0] or die "Cannot write $file->[0]: $!\n";
+    print {$out} $file->[2];
+    close $out or die "Cannot close $file->[0]: $!\n";
+  }
+}
+PERL
 }
 
 clojars_published() {
@@ -36,32 +81,46 @@ clojars_published() {
 clojars_credentials() {
   if [[ -f $secrets_file ]]; then
     if [[ -z ${CLOJARS_USERNAME:-} ]]; then
-      CLOJARS_USERNAME=$("$ys" -e "print: _.clojars.user || ''" \
+      CLOJARS_USERNAME=$("$ys" -e "print: _.clojure.user || ''" \
         "$secrets_file" 2>/dev/null) ||
         die "Could not read the Clojars username from $secrets_file"
     fi
     if [[ -z ${CLOJARS_PASSWORD:-} ]]; then
-      CLOJARS_PASSWORD=$("$ys" -e "print: _.clojars.token || ''" \
+      CLOJARS_PASSWORD=$("$ys" -e "print: _.clojure.token || ''" \
         "$secrets_file" 2>/dev/null) ||
         die "Could not read the Clojars token from $secrets_file"
     fi
   fi
   [[ -n ${CLOJARS_USERNAME:-} && -n ${CLOJARS_PASSWORD:-} ]] ||
     die 'Set CLOJARS_USERNAME/CLOJARS_PASSWORD or' \
-      'clojars.user/clojars.token in ~/.yamlstar-secrets.yaml'
+      'clojure.user/clojure.token in ~/.yamlstar-secrets.yaml'
   export CLOJARS_USERNAME CLOJARS_PASSWORD
 }
 
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
   die "Version must have the form X.Y.Z: $version"
-[[ $version == "$expected" ]] ||
-  die "Requested version $version does not match source version $expected"
+bump=false
+if [[ -n $old_version ]]; then
+  [[ $old_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    die "Old version must have the form X.Y.Z: $old_version"
+  [[ $expected == "$old_version" || $expected == "$version" ]] ||
+    die "Old version $old_version does not match source version $expected"
+  source_versions check
+  if [[ $expected != "$version" ]]; then
+    bump=true
+  fi
+else
+  [[ $version == "$expected" ]] ||
+    die "Requested version $version does not match source version $expected"
+fi
 
 [[ -z $(git status --porcelain) ]] ||
   die 'Working tree is not clean'
 
 branch=$(git branch --show-current)
-[[ $branch == main ]] || die "Release branch must be main, not $branch"
+[[ -n $branch ]] || die 'Cannot release from detached HEAD'
+[[ $branch == main || -n $allow_branch ]] ||
+  die "Release branch must be main, not $branch; set a=1 to override"
 
 head=$(git rev-parse HEAD)
 remote_line=$(git ls-remote origin refs/heads/main)
@@ -86,33 +145,59 @@ published=false
 if clojars_published; then
   published=true
 fi
+if $bump && $published; then
+  die "Clojars version $version already exists; choose a new version"
+fi
 
 if [[ -n $dry_run ]]; then
+  if $bump; then
+    printf 'Would bump version from %s to %s and regenerate Go\n' \
+      "$expected" "$version"
+    printf 'Would run release checks and commit release version %s\n' "$version"
+  else
+    printf 'Would run release checks\n'
+  fi
   if $published; then
     printf 'Clojars version %s is already published\n' "$version"
   else
     printf 'Would publish %s %s to Clojars\n' \
       org.yamlstar/yamlstar-plugin-parser-json-comments "$version"
   fi
-  if [[ $head != "$remote_head" ]]; then
-    printf 'Would publish main at %s\n' "$head"
+  if $bump || [[ $head != "$remote_head" || $branch != main ]]; then
+    printf 'Would publish branch %s with the release commit\n' "$branch"
   fi
-  printf 'Would create %s at %s in %s\n' "$tag" "$head" "$repo"
+  printf 'Would create %s at the release commit in %s\n' "$tag" "$repo"
   exit 0
 fi
+
+if ! $published; then
+  clojars_credentials
+fi
+if $bump; then
+  source_versions bump
+  "$make" generate
+fi
+"$make" release-check
+if $bump; then
+  git add "${version_files[@]}" "$generated"
+  git commit -m "Release JSON-comments parser $version" \
+    -m "Update source versions and regenerate the Go parser for release."
+  head=$(git rev-parse HEAD)
+fi
+[[ -z $(git status --porcelain) ]] ||
+  die 'Release checks left uncommitted changes'
 
 if $published; then
   printf 'Clojars version %s is already published; skipping deployment\n' \
     "$version"
 else
-  clojars_credentials
   "$lein" deploy releases
   clojars_published || die 'Clojars did not publish both the JAR and POM'
 fi
 
-if [[ $head != "$remote_head" ]]; then
-  git push origin HEAD:main
-  printf 'Published main at %s\n' "$head"
+if [[ $head != "$remote_head" || $branch != main ]]; then
+  git push origin "HEAD:$branch"
+  printf 'Published branch %s at %s\n' "$branch" "$head"
 fi
 
 "$gh" release create "$tag" \
