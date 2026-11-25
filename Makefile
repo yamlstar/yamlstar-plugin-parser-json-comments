@@ -52,7 +52,7 @@ default:: test
 
 $(SOURCE-STAMP): $(wildcard $(YAML_PARSER_DIR)/src/yaml_parser/*.clj*)
 	mkdir -p $(BASE-DIR)
-ifdef YAML_PARSER_DIR
+ifneq (,$(strip $(YAML_PARSER_DIR)))
 	cp $(YAML_PARSER_DIR)/src/yaml_parser/*.clj* $(BASE-DIR)/
 else
 	curl -fsSL $(YAML-PARSER-URL) -o $(JAR)
