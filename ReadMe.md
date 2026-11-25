@@ -4,6 +4,8 @@ A reference-parser grammar extension for YAMLStar and go-yaml.
 The Clojure source in this repository is canonical.
 The Go package contains its generated namespace and shares the reference
 parser engine, initialization, event types, and runtime lock.
+This repository replaces the retired
+[JSON-comments sanitizer plugin](https://github.com/yamlstar/yamlstar-plugin-json-comments).
 
 ```go
 import "github.com/yamlstar/yamlstar-plugin-parser-json-comments/parser"
@@ -23,9 +25,8 @@ For YAMLStar Python, use `yamlstar.parser('json-comments')`.
 ## go-yaml integration
 
 The `goyaml` package provides the go-yaml adapter in this module.
-These compatibility changes require a new release: the published `v0.1.0`
-adapter still uses the former `parser` API and `plugin/limit` test import.
-Use the updated local checkout until that release is available.
+The published `v0.1.1` adapter uses the current `yaml-parser` API and go-yaml
+v4 plugin interfaces.
 Use it directly with `yaml.WithPlugin(goyaml.New())`:
 
 ```go
@@ -46,7 +47,7 @@ check its error, and then parse configuration with `yaml.OptsYAML`:
 if err := goyaml.Register(); err != nil {
     return err
 }
-options, err := yaml.OptsYAML("plugin: {yaml-parser: json-comments@v0.1.0}")
+options, err := yaml.OptsYAML("plugin: {yaml-parser: json-comments@v0.1.1}")
 ```
 
 Registration accepts no plugin-specific configuration.
@@ -55,8 +56,7 @@ Importing the package does not register it, and registration preserves the
 native default parser.
 `goyaml.Version` reports the linked parser version.
 
-After publishing the compatibility changes, set `RELEASE` to the new tag
-and use go-yaml's generic CLI build support:
+Set `RELEASE=v0.1.1` and use go-yaml's generic CLI build support:
 
 ```bash
 make cli \
@@ -124,7 +124,7 @@ plugin and updating downstream release builds.
 From a clean `main` containing the changes to publish, run, for example:
 
 ```bash
-make release o=0.1.0 v=0.1.1
+make release o=0.1.1 v=0.1.2
 ```
 
 The target checks the old version, updates the source version declarations,
@@ -137,7 +137,7 @@ It deploys the JVM JAR and POM to Clojars and verifies that both are available.
 It then publishes the release branch and creates the matching tag and GitHub
 release at that commit.
 The same tag includes the `goyaml` adapter; no binary assets are needed.
-Use `make release v=0.1.1` when the source version is already committed.
+Use `make release v=0.1.2` when the source version is already committed.
 Add `a=1` to allow releasing from the current branch instead of `main`.
 The override publishes that branch and requires it to contain remote `main`.
 
@@ -167,6 +167,6 @@ An existing Clojars version cannot be used for a new version bump.
 Incomplete artifacts, repository errors, and deployment failures stop the
 release before GitHub publication.
 Generation or validation failures leave version edits uncommitted for review.
-Use `make release o=0.1.0 v=0.1.1 d=1` to preview the preparation and both
+Use `make release o=0.1.1 v=0.1.2 d=1` to preview the preparation and both
 publications without editing source files, committing, or uploading artifacts.
 The dry run does not require Clojars credentials.
